@@ -1,0 +1,26 @@
+# Isolated stack for the G2 iMessage bridge project.
+# Deliberately kept separate from /opt/docker/docker-compose.yml — do not
+# merge into the main stack; this uses network_mode: host on tetherd for
+# direct Bluetooth (BlueZ/D-Bus/HCI) access to the passed-through USB adapter
+# (0cf3:e009), which the main stack's containers do not need or use.
+services:
+  tetherd:
+    build: ./tetherd
+    container_name: g2-tetherd
+    network_mode: host
+    privileged: true   # needed for raw HCI access (btmgmt, bluetoothd); can be
+                        # narrowed later to specific --cap-add/--device entries
+                        # once we confirm exactly what's required.
+    volumes:
+      - ./tetherd/data:/root/.config/tether
+      # Critical: BlueZ's pairing/bond storage (bluetoothd) lives here, not
+      # in tether's own config dir above. Without this mount, any container
+      # recreate (`docker compose down/up`, not just `restart`) silently
+      # wipes every Bluetooth bond - including the iPad's hard-won dual
+      # BR/EDR+LE pairing - and the whole pairing dance has to be redone
+      # from scratch (unpair on phone, re-pair, re-grant MAP/PBAP
+      # permissions, wait for ANCS toggles to reappear, etc).
+      - ./tetherd/bluetooth:/var/lib/bluetooth
+    restart: unless-stopped
+
+networks: {}
