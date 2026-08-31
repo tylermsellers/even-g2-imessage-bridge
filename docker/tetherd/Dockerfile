@@ -7,7 +7,7 @@ FROM debian:unstable AS build
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    g++ cmake ninja-build git pkg-config ca-certificates \
+    g++ cmake ninja-build git pkg-config ca-certificates patch \
     libwayland-dev libavahi-client-dev libssl-dev libglib2.0-dev \
     libgtk-3-dev libgtk-layer-shell-dev libnotify-dev \
     npm zip gettext \
@@ -15,6 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 RUN git clone --depth 1 https://github.com/zackb/tether.git .
+
+# Limits the MAP inbox/sent backfill+poll to the last 30 days, enforced by
+# the phone itself via BlueZ's MAP PeriodBegin filter (not a local
+# post-filter) - see tether-patch/README.md for the full rationale.
+COPY tether-patch /tmp/tether-patch
+RUN sh /tmp/tether-patch/apply.sh
 
 # Headless build: we only need tetherd + tether CLI, not tether-gtk, but the
 # project's single CMakeLists builds everything together. BLUETOOTHD_PATH is

@@ -1,0 +1,18 @@
+--- a/src/core/src/bluetooth/map_session.cpp
++++ b/src/core/src/bluetooth/map_session.cpp
+@@ -87,11 +87,13 @@
+         return true;
+     }
+ 
+-    std::vector<MapListing> MapSession::list_messages(const std::string& folder, int max, std::string& err) {
++    std::vector<MapListing> MapSession::list_messages(const std::string& folder, int max, std::string& err, const std::string& period_begin) {
+         std::vector<MapListing> listings;
+ 
+         GVariantBuilder filter;
+         g_variant_builder_init(&filter, G_VARIANT_TYPE("a{sv}"));
+         g_variant_builder_add(&filter, "{sv}", "MaxCount", g_variant_new_uint16(static_cast<guint16>(max)));
++        if (!period_begin.empty())
++            g_variant_builder_add(&filter, "{sv}", "PeriodBegin", g_variant_new_string(period_begin.c_str()));
+ 
+         GError* error = nullptr;
+         GVariant* reply = g_dbus_connection_call_sync(state_->bus,

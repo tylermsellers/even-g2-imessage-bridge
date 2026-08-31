@@ -1,0 +1,51 @@
+--- a/src/core/src/bluetooth/connection.cpp
++++ b/src/core/src/bluetooth/connection.cpp
+@@ -255,6 +255,21 @@
+                    err.find("Transport is not connected") != std::string::npos;
+         };
+         constexpr int MESSAGE_LIST_MAX = 200;
++        // How far back the MAP inbox/sent backfill and poll are allowed to
++        // reach, independent of MESSAGE_LIST_MAX. Enforced by the phone itself
++        // via BlueZ's MAP "PeriodBegin" filter, not a local post-filter, so
++        // older messages never leave the phone in the first place.
++        constexpr int MESSAGE_HISTORY_DAYS = 30;
++
++        // BlueZ MAP filter date format: YYYYMMDDTHHMMSS (org.bluez.obex.MessageAccess(5)).
++        std::string message_history_period_begin() {
++            std::time_t cutoff = std::time(nullptr) - static_cast<std::time_t>(MESSAGE_HISTORY_DAYS) * 86400;
++            std::tm tm{};
++            localtime_r(&cutoff, &tm);
++            char buf[32];
++            std::strftime(buf, sizeof(buf), "%Y%m%dT%H%M%S", &tm);
++            return buf;
++        }
+         // Bodies are fetched one OBEX Get at a time on the connection thread,
+         // which also has ANCS and the bearer supervisor. Needs cap to keep the
+         // first listing of a full mailbox from stalling all of it
+@@ -733,7 +747,7 @@
+ 
+         std::string err;
+         // Empty means the current folder; a name means that child of it.
+-        auto listings = session->list_messages(map_lists_subfolders ? MAP_FOLDER_INBOX : "", MESSAGE_LIST_MAX, err);
++        auto listings = session->list_messages(map_lists_subfolders ? MAP_FOLDER_INBOX : "", MESSAGE_LIST_MAX, err, message_history_period_begin());
+ 
+         // Some stacks only answer for the folder they are standing in. Walking
+         // into the inbox costs the sent folder but keeps messages working, so it
+@@ -748,7 +762,7 @@
+             if (!session->set_folder(MAP_FOLDER_INBOX, nav_err))
+                 debug::log(WARN, "bluetooth: SetFolder({}) failed: {}", MAP_FOLDER_INBOX, nav_err);
+             err.clear();
+-            listings = session->list_messages("", MESSAGE_LIST_MAX, err);
++            listings = session->list_messages("", MESSAGE_LIST_MAX, err, message_history_period_begin());
+         }
+ 
+         if (!err.empty()) {
+@@ -773,7 +787,7 @@
+         // shows one side of itself.
+         if (map_lists_sent) {
+             std::string sent_err;
+-            auto sent = session->list_messages(MAP_FOLDER_SENT, MESSAGE_LIST_MAX, sent_err);
++            auto sent = session->list_messages(MAP_FOLDER_SENT, MESSAGE_LIST_MAX, sent_err, message_history_period_begin());
+             if (!sent_err.empty()) {
+                 if (!map_session_dead(sent_err)) {
+                     debug::log(WARN,

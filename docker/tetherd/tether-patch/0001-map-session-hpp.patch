@@ -1,0 +1,17 @@
+--- a/src/core/include/tether/bluetooth/map_session.hpp
++++ b/src/core/include/tether/bluetooth/map_session.hpp
+@@ -53,8 +53,11 @@
+         // Selects a MAP folder. SetFolder walks the hierarchy from the session
+         // root, so this takes a path like "telecom/msg/inbox"
+         bool set_folder(const std::string& folder, std::string& err);
+ 
+-        // Lists the current folder. `max` bounds the transfer
+-        std::vector<MapListing> list_messages(const std::string& folder, int max, std::string& err);
++        // Lists the current folder. `max` bounds the transfer. `period_begin`,
++        // when set, is a BlueZ MAP filter date string (YYYYMMDDTHHMMSS, see
++        // org.bluez.obex.MessageAccess(5)) that excludes anything older - the
++        // phone itself does the filtering, so old messages never leave it.
++        std::vector<MapListing> list_messages(const std::string& folder, int max, std::string& err, const std::string& period_begin = "");
+ 
+         // Fetches and parses the full bMessage for one handle
+         bool fetch_bmessage(const std::string& message_path, BMessage& out, std::string& err);
