@@ -9,6 +9,12 @@ npm-debug.log*
 .env.*
 !.env.example
 
+# Server-side runtime data / secrets - never committed even if pulled
+# down locally for debugging (BlueZ bonds, tether config, tailscale state).
+docker/tetherd/data/
+docker/tetherd/bluetooth/
+docker/tailscale/state/
+
 # debug artifacts from simulator screenshots
 *.png
 

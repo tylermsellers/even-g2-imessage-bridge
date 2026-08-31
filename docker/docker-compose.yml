@@ -21,6 +21,54 @@ services:
       # from scratch (unpair on phone, re-pair, re-grant MAP/PBAP
       # permissions, wait for ANCS toggles to reappear, etc).
       - ./tetherd/bluetooth:/var/lib/bluetooth
+      # tetherd's bt_* commands (threads/messages/send/status) only answer
+      # over its local UNIX socket, never TCP (see docs/PROTOCOL.md
+      # upstream: "local-only ... because everything here is personal
+      # data"). Sharing this directory with the bridge container is how the
+      # bridge reaches that socket - see docker/bridge/src/tetherClient.js.
+      - ./tetherd/run:/run/user/0/tether
+    restart: unless-stopped
+
+  bridge:
+    build: ./bridge
+    container_name: g2-bridge
+    # host networking so tailscale (also host-networked, below) can reach
+    # this service over 127.0.0.1. The bridge itself binds only to
+    # 127.0.0.1 inside its own process (see src/index.js), so it is never
+    # reachable from the LAN directly - only via the tailscale container
+    # proxying to it over loopback.
+    network_mode: host
+    volumes:
+      # Same shared socket directory as tetherd, above - this is how the
+      # bridge talks to tetherd's bt_* commands; there is no TCP path.
+      - ./tetherd/run:/run/user/0/tether
+    env_file:
+      - ./bridge/.env
+    depends_on:
+      - tetherd
+    restart: unless-stopped
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: g2-tailscale
+    hostname: g2-imessage-bridge
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve-config.json
+      # Tagged (not ephemeral) key: this is a persistent server node, not a
+      # throwaway CI runner - see docker/tailscale/README.md for how the
+      # auth key was generated and why.
+    env_file:
+      - ./tailscale/.env
+    volumes:
+      - ./tailscale/state:/var/lib/tailscale
+      - ./tailscale/serve-config.json:/config/serve-config.json:ro
+    devices:
+      - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
 
 networks: {}
