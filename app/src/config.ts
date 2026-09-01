@@ -70,6 +70,16 @@ export async function loadConfig(): Promise<AppConfig> {
 
 export async function saveConfig(next: Partial<AppConfig>): Promise<void> {
   cached = { ...cached, ...next }
+  // Apply the same normalization loadConfig() does — otherwise the very
+  // first "Save & Test Connection" click (before any reload ever calls
+  // loadConfig() again) tests against raw, un-normalized input. A trailing
+  // slash on the URL or stray whitespace on a copy-pasted token/URL (very
+  // easy to pick up from a QR scan or clipboard paste) would otherwise
+  // silently break that first connection test.
+  if (next.bridgeUrl !== undefined) cached.bridgeUrl = cached.bridgeUrl.trim().replace(/\/+$/, '')
+  if (next.bridgeToken !== undefined) cached.bridgeToken = cached.bridgeToken.trim()
+  if (next.sttKey !== undefined) cached.sttKey = cached.sttKey.trim()
+  if (next.sttRegion !== undefined) cached.sttRegion = cached.sttRegion.trim()
   await Promise.all([
     setPersistent(KEY_BRIDGE_URL, cached.bridgeUrl),
     setPersistent(KEY_BRIDGE_TOKEN, cached.bridgeToken),
