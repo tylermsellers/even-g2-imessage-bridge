@@ -1,0 +1,33 @@
+{
+  "package_id": "com.tylermsellers.g2imessage",
+  "edition": "202601",
+  "name": "iMessage",
+  "version": "0.1.1",
+  "min_app_version": "2.2.9",
+  "min_sdk_version": "0.0.14",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connects to your own Tailscale-secured bridge (reads/sends iMessages via tetherd over Bluetooth) and, if configured, your chosen speech-to-text provider for voice replies.",
+      "whitelist": [
+        "https://g2-imessage-bridge.REDACTED-TAILNET.ts.net",
+        "https://api.openai.com",
+        "https://api.deepgram.com",
+        "https://api.soniox.com",
+        "https://*.stt.speech.microsoft.com"
+      ]
+    },
+    {
+      "name": "phone-microphone",
+      "desc": "Records your voice reply using the phone's microphone, so it can be transcribed and sent as a real iMessage/SMS."
+    },
+    {
+      "name": "camera",
+      "desc": "Scans a one-time setup QR code to auto-fill your bridge URL and token, so you don't have to copy/paste them by hand."
+    }
+  ],
+  "supported_languages": [
+    "en"
+  ]
+}

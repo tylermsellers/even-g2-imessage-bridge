@@ -1,8 +1,135 @@
-# Feature Request: Native iMessage/SMS + Notification Integration for G2
+# G2 iMessage Bridge — Working Implementation + Feature Request
 
 **Author:** Tyler Sellers
+**Status:** ✅ Working end-to-end (real hardware) — glasses app reads/replies to iMessage/SMS threads via a self-hosted bridge, no jailbreak, no Mac proxy.
+
+This repo has two parts:
+1. **A working self-hosted implementation** (`docker/` + `app/`) — a Docker
+   stack that pairs a spare Linux box with your iPhone over Bluetooth (ANCS +
+   MAP + PBAP), exposes it as an HTTPS API, and an Even Hub G2 glasses app
+   that reads/replies to threads through it. This is what you can actually
+   run today.
+2. **A feature request** (below the architecture section) asking Even
+   Realities to build the equivalent natively into the G2 companion app/
+   firmware, so no separate Linux box is required.
+
+---
+
+## Architecture
+
+```
+ iPhone  <--Bluetooth (ANCS+MAP+PBAP)-->  Linux host (tetherd, BlueZ)
+                                                |
+                                          UNIX socket (local only)
+                                                |
+                                          bridge (Node, Express)
+                                          binds 127.0.0.1 only
+                                                |
+                                   Tailscale container (host network)
+                                     Funnel: public HTTPS -> 127.0.0.1
+                                                |
+                                        HTTPS (token-authed)
+                                                |
+                                  Even Hub G2 glasses app (this repo's app/)
+                                  + phone Settings screen (pairing/config)
+```
+
+- **`docker/tetherd/`** — runs [zackb/tether](https://github.com/zackb/tether)'s
+  daemon (`tetherd`) against a passed-through USB Bluetooth adapter.
+  `network_mode: host` + `privileged: true` for raw HCI/D-Bus access.
+  Bluetooth bond storage (`/var/lib/bluetooth`) and tetherd's own config are
+  both bind-mounted to the host so `docker compose down/up` never wipes a
+  hard-won pairing.
+- **`docker/bridge/`** — a small Node/Express service that talks to
+  `tetherd` over its local-only UNIX socket (never TCP — this is
+  intentional in upstream `tether`, since everything on that socket is
+  personal message data) and re-exposes it as a token-authed HTTPS JSON
+  API (`/api/threads`, `/api/messages/:address`, `/api/send`, `/api/health`).
+  Binds to `127.0.0.1` only inside its container — never directly
+  LAN-reachable.
+- **`docker/tailscale/`** — a Tailscale container (host network) running
+  **Funnel**, which exposes the bridge's `127.0.0.1` service at a public
+  HTTPS URL (`https://<your-node-name>.<your-tailnet>.ts.net`) with a
+  Tailscale-issued cert. This is what actually gets reachability from a
+  phone that isn't itself on the tailnet (e.g. over cellular data, or when
+  your carrier/VPN policy rules out installing Tailscale on the phone
+  itself — this was the case here).
+- **`app/`** — the Even Hub G2 app (TypeScript + `@evenrealities/even_hub_sdk`).
+  Two surfaces:
+  - **Glasses UI**: thread list (unread dot, relative timestamp, `<<`/`>>`
+    direction markers) → reader (chat-bubble-style indentation, scrollback
+    paging, sender header) → voice reply (VAD auto-stop recording → STT →
+    confirm → send via the bridge's `/api/send`).
+  - **Phone Settings UI** (intentionally minimal, per design decision):
+    bridge URL/token entry (manual or QR-code camera scan), STT
+    provider/key, and a connection test — no message content is ever shown
+    on the phone, by design; all reading/replying happens on-glasses.
+
+## What worked
+
+- **ANCS + MAP + PBAP over a real Bluetooth Classic+LE dual bond** — full
+  thread read, history read, and *send* (not just notification mirroring).
+  This is the core finding: MAP gives real reply capability that ANCS alone
+  cannot.
+- **Tailscale Funnel** for public HTTPS reachability without opening a
+  router port or relying on the phone joining the tailnet — necessary here
+  since a work VPN policy ruled out installing Tailscale on the iPhone
+  itself.
+- **QR-code pairing** (camera scan of a `{"u":...,"t":...}` JSON payload)
+  to avoid manually typing the bridge URL/token/STT key on a phone
+  keyboard.
+- **Text-container scroll/click gestures arrive as `event.textEvent`, not
+  `event.sysEvent`** — this isn't documented prominently outside the SDK's
+  own README appendix and cost real debugging time; worth flagging for
+  anyone else building a scrollable-text glasses app.
+- **`bridge.shutDownPageContainer(1)`** (confirmation-dialog exit mode) is
+  the correct double-tap "exit app" flow; cleanup must happen in the
+  `SYSTEM_EXIT_EVENT`/`ABNORMAL_EXIT_EVENT` handlers, not before the exit
+  call, or a cancelled exit leaves the app on-screen but deaf to input.
+
+## What didn't work / dead ends
+
+- **No self-pairing on iOS.** A sandboxed app cannot request its own
+  device's notifications/messages this way — the whole protocol only works
+  because the accessory (in this case, the Linux box, standing in for what
+  should eventually be the glasses themselves) is a *separate* physical
+  Bluetooth device pairing to the phone. This is why a Linux-box relay (or
+  eventually native G2 firmwarwe/companion-app support) is required, not
+  optional.
+- **No Even Hub SDK path exists today.** `@evenrealities/even_hub_sdk`
+  v0.0.14 has no Bluetooth/notification-access API — confirmed by
+  inspection, not just docs. This is squarely an Even Realities
+  firmware/companion-app gap, not something a third-party app can route
+  around.
+- **Real-hardware-only concurrency bug**: rendering the phone Settings UI
+  unconditionally at startup (a workaround for the simulator's separate
+  preview window never firing `onLaunchSource`) caused two concurrent
+  `bridge.getLocalStorage` RPC calls on real hardware (glasses boot path +
+  phone boot path), which the native bridge doesn't handle the way the
+  simulator's in-memory stub does — manifesting as a blank phone screen and
+  a glasses UI stuck on "Loading…". Fixed by gating phone-UI rendering
+  strictly behind a confirmed `onLaunchSource === 'appMenu'` event (never
+  unconditional), plus adding timeouts to all storage/page-container RPCs
+  as defense-in-depth.
+- **Notification mirroring (ANCS) does not work on iOS 18 and earlier** —
+  per BlueFerry's own findings, needs iOS 19+. Not something this project
+  can fix; noted here since it affects the phased-scope feature request
+  below.
+
+## Repo layout
+
+```
+docker/            Bridge stack: tetherd (Bluetooth), bridge (HTTPS API), tailscale (Funnel)
+app/                Even Hub G2 glasses app (TypeScript, this project's actual deliverable)
+server/             Early Node proof-of-concept client (tetherClient.js) — superseded by docker/bridge
+GITHUB-COMMENT-issue-24.md   Draft comment for Even Realities' own SDK issue tracker (redacted, no bridge URL/tokens)
+```
+
+---
+
+## Feature Request: Native iMessage/SMS + Notification Integration for G2
+
 **Audience:** Even Realities firmware/companion-app engineering
-**Status:** Proposal, with a working reference implementation of the required Bluetooth protocol (third-party, MIT-licensed)
 **Where to file:** [github.com/even-realities/everything-evenhub/issues](https://github.com/even-realities/everything-evenhub/issues)
 (the SDK's own issue tracker — search first for existing BLE/notification-access requests to avoid a duplicate)
 

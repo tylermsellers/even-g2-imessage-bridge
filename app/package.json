@@ -1,0 +1,24 @@
+{
+  "name": "even-g2-imessage",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173 --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.14",
+    "@evenrealities/evenhub-simulator": "^0.9.4",
+    "qrcode": "^1.5.4",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.14",
+    "@evenrealities/pretext": "^0.1.4",
+    "even-notifications": "^1.0.1",
+    "jsqr": "^1.4.0"
+  }
+}

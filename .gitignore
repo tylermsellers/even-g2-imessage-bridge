@@ -3,6 +3,7 @@ dist/
 dist-ssr/
 *.log
 npm-debug.log*
+*.ehpk
 
 # secrets / local env
 .env
