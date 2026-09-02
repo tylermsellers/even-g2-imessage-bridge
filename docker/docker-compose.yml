@@ -51,7 +51,7 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     container_name: g2-tailscale
-    hostname: g2-imessage-bridge
+    hostname: g2-gateway
     network_mode: host
     cap_add:
       - NET_ADMIN

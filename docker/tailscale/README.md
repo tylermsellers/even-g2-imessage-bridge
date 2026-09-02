@@ -5,7 +5,7 @@
 Runs the official `tailscale/tailscale` container in `network_mode: host`
 alongside `tetherd` and `bridge`, and uses a declarative `TS_SERVE_CONFIG` to:
 
-1. Join your tailnet as a persistent node (`g2-imessage-bridge`).
+1. Join your tailnet as a persistent node (`g2-gateway`).
 2. Terminate TLS on port 443 with a Tailscale-issued cert for
    `<node>.<tailnet>.ts.net`.
 3. Reverse-proxy all traffic to `http://127.0.0.1:8787` — the `bridge`
@@ -50,11 +50,11 @@ here, not the Funnel toggle.
 4. `docker compose up -d tailscale` (after `bridge` and `tetherd` are
    already up). Check it registered: `docker exec g2-tailscale tailscale status`.
 5. Find your Funnel URL: `docker exec g2-tailscale tailscale funnel status`
-   — it'll be `https://g2-imessage-bridge.<your-tailnet>.ts.net`.
+   — it'll be `https://g2-gateway.<your-tailnet>.ts.net`.
 6. Verify from anywhere (not just the LAN):
    ```sh
    curl -H "x-bridge-token: <your BRIDGE_TOKEN>" \
-     https://g2-imessage-bridge.<your-tailnet>.ts.net/api/health
+     https://g2-gateway.<your-tailnet>.ts.net/api/health
    ```
 
 ## Why the bridge, not tetherd, is what's exposed

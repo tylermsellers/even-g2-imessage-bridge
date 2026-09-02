@@ -104,19 +104,18 @@ function truncate(s: string, maxBytes: number): string {
   return result + ellipsis
 }
 
-// Compact relative-time label ("now", "5m", "3h", "2d") for thread-list rows
-// and message timestamps — matches native Messages' terse list style far
-// better than an absolute clock time would fit in so little width.
-function relativeTime(unixSeconds: number): string {
+// Absolute clock time for thread-list rows (e.g. "12:04"), replacing the
+// old compact relative-age label ("7h") per user feedback — the real
+// device-local time is more useful at a glance than an elapsed count, and
+// this app's screen has enough width to fit "HH:MM" next to a name.
+// Uses the phone/glasses' own local Date object, so it always reflects
+// whatever timezone the paired device is actually in.
+function formatThreadTime(unixSeconds: number): string {
   if (!unixSeconds) return ''
-  const diffSec = Math.max(0, Date.now() / 1000 - unixSeconds)
-  if (diffSec < 60) return 'now'
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h`
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}d`
+  const d = new Date(unixSeconds * 1000)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
 }
 
 // ---------------------------------------------------------------------------
@@ -203,20 +202,67 @@ function listPage(items: string[]): ListContainerProperty {
 
 function threadLabel(t: Thread): string {
   // Filled vs. empty circle distinguishes unread (new) from already-read
-  // threads — always shown (not blank space for read, as before) so the
-  // read state is visible at a glance rather than inferred from absence.
+  // threads — kept per-row too (not just the section header below) so the
+  // read state is still visible at a glance within each section.
   const unreadMark = t.unread ? '● ' : '○ '
-  const time = relativeTime(t.timestamp)
-  const suffix = time ? ` · ${time}` : ''
-  return truncate(`${unreadMark}${t.name}${suffix}: ${t.preview}`, 62)
+  const time = formatThreadTime(t.timestamp)
+  const suffix = time ? ` (${time})` : ''
+  return truncate(`${unreadMark}${t.name}${suffix} - ${t.preview}`, 62)
 }
+
+// Section header row — a non-interactive divider line, not a real thread.
+// See buildThreadRows: rendered rows and `threads` don't map 1:1 once
+// headers are inserted, so onListEvent looks up the tapped row through
+// threadRowMap (which has `null` at header positions) rather than indexing
+// into `threads` directly.
+function sectionHeaderLabel(label: string): string {
+  return truncate(`— ${label} —`, 62)
+}
+
+// Splits threads into an "Unread" section (newest activity first) and a
+// "Read" section, per user feedback — previously all threads were a single
+// flat list ordered however tetherd returned them, so an unread message
+// could be buried below a long tail of already-read conversations. Each
+// group keeps tetherd's original relative order (Array#filter preserves
+// it), which is already recency-sorted. Headers are only inserted when
+// both sections are non-empty — no point labeling a single section.
+function buildThreadRows(all: Thread[]): { items: string[]; map: (Thread | null)[] } {
+  const unread = all.filter((t) => t.unread)
+  const read = all.filter((t) => !t.unread)
+  const items: string[] = []
+  const map: (Thread | null)[] = []
+  const showHeaders = unread.length > 0 && read.length > 0
+  if (showHeaders) {
+    items.push(sectionHeaderLabel('Unread'))
+    map.push(null)
+  }
+  for (const t of unread) {
+    items.push(threadLabel(t))
+    map.push(t)
+  }
+  if (showHeaders) {
+    items.push(sectionHeaderLabel('Read'))
+    map.push(null)
+  }
+  for (const t of read) {
+    items.push(threadLabel(t))
+    map.push(t)
+  }
+  return { items, map }
+}
+
+// Maps rendered list-row index -> underlying Thread (or null for a section
+// header row) — populated by renderThreads, read by onListEvent.
+let threadRowMap: (Thread | null)[] = []
 
 async function renderThreads() {
   mode = 'threads'
+  const { items, map } = buildThreadRows(threads)
+  threadRowMap = map
   await rebuild(
     new RebuildPageContainer({
       containerTotalNum: 1,
-      listObject: [listPage(threads.map(threadLabel))],
+      listObject: [listPage(items)],
     }),
   )
 }
@@ -571,10 +617,42 @@ async function refreshThreads() {
   }
 }
 
+// Re-fetches the currently-open conversation and re-renders if anything
+// changed. Previously, opening a thread only ever loaded messages once
+// (see onListEvent) and the 8s poll loop only refreshed the thread LIST —
+// so a message arriving while the reader was already open never appeared
+// until the user backed out and reopened the thread. This mirrors
+// refreshThreads' polling for the reader view specifically.
+let readerRefreshInFlight = false
+async function refreshReaderMessages() {
+  const thread = selectedThread
+  if (!thread || readerRefreshInFlight) return
+  readerRefreshInFlight = true
+  try {
+    const fresh = mergeLocalSentEchoes(thread.id, await listMessages(thread.id)).slice(-READER_HISTORY_LIMIT)
+    const changed =
+      fresh.length !== readerMessages.length ||
+      fresh[fresh.length - 1]?.id !== readerMessages[readerMessages.length - 1]?.id
+    readerMessages = fresh
+    if (changed && mode === 'reader') {
+      try {
+        await renderReader()
+      } catch (err) {
+        console.log('renderReader (refresh) failed:', err)
+      }
+    }
+  } catch (err) {
+    console.log('refreshReaderMessages failed:', err)
+  } finally {
+    readerRefreshInFlight = false
+  }
+}
+
 function startPolling() {
   stopPolling()
   pollTimer = setInterval(() => {
     if (mode === 'threads') void refreshThreads()
+    else if (mode === 'reader') void refreshReaderMessages()
   }, POLL_INTERVAL_MS)
 }
 
@@ -618,7 +696,10 @@ function mergeLocalSentEchoes(threadId: string, messages: Message[]): Message[] 
 
 async function onListEvent(index: number) {
   if (mode !== 'threads') return
-  const picked = threads.slice(0, 20)[index]
+  // Row index now maps through threadRowMap (see buildThreadRows) since
+  // section header rows are interspersed with real thread rows and aren't
+  // 1:1 with `threads` anymore. A tap on a header row (null) is ignored.
+  const picked = threadRowMap[index]
   if (!picked) return
   selectedThread = picked
   readerScrollOffset = 0
