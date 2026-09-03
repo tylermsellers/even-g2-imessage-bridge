@@ -5,10 +5,11 @@
 
 This repo has two parts:
 1. **A working self-hosted implementation** (`docker/` + `app/`) — a Docker
-   stack that pairs a spare Linux box with your iPhone over Bluetooth (ANCS +
-   MAP + PBAP), exposes it as an HTTPS API, and an Even Hub G2 glasses app
-   that reads/replies to threads through it. This is what you can actually
-   run today.
+   stack that pairs a spare Linux box with your iOS device over Bluetooth
+   (ANCS + MAP + PBAP — in this deployment, an iPad; the same protocol
+   works identically against an iPhone), exposes it as an HTTPS API, and an
+   Even Hub G2 glasses app that reads/replies to threads through it. This
+   is what you can actually run today.
 2. **A feature request** (below the architecture section) asking Even
    Realities to build the equivalent natively into the G2 companion app/
    firmware, so no separate Linux box is required.
@@ -18,7 +19,7 @@ This repo has two parts:
 ## Architecture
 
 ```
- iPhone  <--Bluetooth (ANCS+MAP+PBAP)-->  Linux host (tetherd, BlueZ)
+ iOS device (iPad) <--Bluetooth (ANCS+MAP+PBAP)-->  Linux host (tetherd, BlueZ, Docker)
                                                 |
                                           UNIX socket (local only)
                                                 |
@@ -33,6 +34,15 @@ This repo has two parts:
                                   Even Hub G2 glasses app (this repo's app/)
                                   + phone Settings screen (pairing/config)
 ```
+
+Plain-English version of the chain: an iPad is Bluetooth-paired directly to
+a spare Linux box, which runs the whole stack in Docker. The Linux box
+relays that Bluetooth session out to the internet over a Tailscale Funnel
+HTTPS URL. The Even Hub G2 glasses app (running on your phone/glasses,
+separate from the paired iPad) talks to that HTTPS URL to read/reply to
+threads. No Shortcuts automation, no Mac, no BlueBubbles-style proxy
+anywhere in this chain — the iPad's Bluetooth Classic (MAP) + BLE (ANCS)
+radios are the entire data path from iOS to Linux.
 
 - **`docker/tetherd/`** — runs [zackb/tether](https://github.com/zackb/tether)'s
   daemon (`tetherd`) against a passed-through USB Bluetooth adapter.
@@ -72,9 +82,9 @@ This repo has two parts:
   This is the core finding: MAP gives real reply capability that ANCS alone
   cannot.
 - **Tailscale Funnel** for public HTTPS reachability without opening a
-  router port or relying on the phone joining the tailnet — necessary here
-  since a work VPN policy ruled out installing Tailscale on the iPhone
-  itself.
+  router port or relying on the glasses' companion phone joining the
+  tailnet — necessary here since a work VPN policy ruled out installing
+  Tailscale on that phone.
 - **QR-code pairing** (camera scan of a `{"u":...,"t":...}` JSON payload)
   to avoid manually typing the bridge URL/token/STT key on a phone
   keyboard.
@@ -93,8 +103,8 @@ This repo has two parts:
   device's notifications/messages this way — the whole protocol only works
   because the accessory (in this case, the Linux box, standing in for what
   should eventually be the glasses themselves) is a *separate* physical
-  Bluetooth device pairing to the phone. This is why a Linux-box relay (or
-  eventually native G2 firmwarwe/companion-app support) is required, not
+  Bluetooth device pairing to the iOS device. This is why a Linux-box relay
+  (or eventually native G2 firmware/companion-app support) is required, not
   optional.
 - **No Even Hub SDK path exists today.** `@evenrealities/even_hub_sdk`
   v0.0.14 has no Bluetooth/notification-access API — confirmed by
@@ -182,11 +192,12 @@ GITHUB-COMMENT-issue-24.md   Draft comment for Even Realities' own SDK issue tra
 
 ## The ask, in one sentence
 
-Let the G2's own iOS companion app pair with the iPhone as a real Bluetooth
-accessory (like a car head unit or Apple Watch does today) so it can read
-*and reply to* iMessage/SMS and mirror live notifications — natively, with
-no phone-side relay box, jailbreak, or Mac proxy required — and expose the
-result to third-party Even Hub apps through a small, permissioned SDK API.
+Let the G2's own iOS companion app pair with the user's iOS device (iPhone
+or iPad) as a real Bluetooth accessory (like a car head unit or Apple Watch
+does today) so it can read *and reply to* iMessage/SMS and mirror live
+notifications — natively, with no separate relay box, jailbreak, or Mac
+proxy required — and expose the result to third-party Even Hub apps through
+a small, permissioned SDK API.
 
 ## Why a third-party developer can't build this today
 
@@ -200,12 +211,12 @@ are Apple-platform-level, not just SDK gaps:
    something exposed to third-party glasses apps.
 2. **Even if it were exposed, iOS won't let a sandboxed app do this to
    itself.** The protocols that make this possible (below) work by having
-   the iPhone treat a *separate physical device* as a paired Bluetooth
+   the iOS device treat a *separate physical device* as a paired Bluetooth
    accessory. There is no supported (or unsupported-but-possible) way for
-   an app running on the same iPhone to request its own notifications or
+   an app running on that same device to request its own notifications or
    messages this way — self-pairing isn't a thing. So even a fully native,
    Apple-approved companion app hits a wall unless the *glasses themselves*
-   are the Bluetooth accessory that pairs to the phone — which they already
+   are the Bluetooth accessory that pairs to the device — which they already
    are, physically. The gap is firmware/companion-app capability, not
    sandboxing of a third-party app.
 3. **This has to live in Even's own native companion app + glasses
@@ -247,9 +258,9 @@ Apple considers private:
   `Connect()` on the unpaired device and let iOS initiate authentication as
   central; this is what produces a single dual Classic+LE bond instead of
   two separate device records.
-- After pairing, the iPhone's Bluetooth settings for that accessory show
-  **"Show Message Notifications"** and **"Sync Contacts"** toggles — both
-  must be enabled by the user, once.
+- After pairing, the iOS device's Bluetooth settings for that accessory
+  show **"Show Message Notifications"** and **"Sync Contacts"** toggles —
+  both must be enabled by the user, once.
 - Notification mirroring does not work on iOS 18 and earlier (needs 19+).
 
 ### The resulting wire protocol (for scoping engineering effort)
