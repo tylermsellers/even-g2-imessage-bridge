@@ -11,6 +11,24 @@ services:
     privileged: true   # needed for raw HCI access (btmgmt, bluetoothd); can be
                         # narrowed later to specific --cap-add/--device entries
                         # once we confirm exactly what's required.
+    labels:
+      # Scopes willfarrell/autoheal (below) to only ever restart this one
+      # container - never touches bridge/tailscale/or anything in the main
+      # media stack, even though autoheal itself needs broad docker.sock
+      # access to work at all.
+      - autoheal=true
+    healthcheck:
+      # See healthcheck.sh's own comment: bt_status alone isn't a reliable
+      # signal here, since it stays "ok" even after the MAP OBEX session
+      # has silently died (a known tetherd limitation - it only attempts
+      # the MAP session once at startup, no automatic retry). This actually
+      # round-trips a real bt_list_threads call through the live MAP
+      # session, which is what glasses-app polling depends on.
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 60s
+      timeout: 12s
+      retries: 3
+      start_period: 45s
     volumes:
       - ./tetherd/data:/root/.config/tether
       # Critical: BlueZ's pairing/bond storage (bluetoothd) lives here, not
@@ -70,5 +88,29 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
+
+  autoheal:
+    # Watches for any container labeled autoheal=true (only g2-tetherd,
+    # above) reporting Docker HEALTHCHECK status "unhealthy", and restarts
+    # exactly that container - this is what makes a dropped Bluetooth MAP
+    # session (see healthcheck.sh/entrypoint.sh's own comments: tetherd
+    # never retries the MAP session on its own after startup) self-heal
+    # without a manual SSH-in-and-restart every time.
+    #
+    # Security tradeoff, spelled out: this needs read/write access to the
+    # host's Docker socket to call the restart API - broad in principle,
+    # but AUTOHEAL_CONTAINER_LABEL scopes its actual *behavior* to only
+    # ever act on labeled containers. It does not join network_mode: host
+    # and has no other volumes, so its blast radius if compromised is
+    # "can start/stop/restart containers", not "can read tetherd's
+    # Bluetooth bond data or the bridge's token".
+    image: willfarrell/autoheal:latest
+    container_name: g2-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 networks: {}

@@ -41,7 +41,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bluez bluez-obexd dbus avahi-daemon openssl libavahi-client3 \
     libwayland-client0 libnotify4 libglib2.0-0 ca-certificates \
-    evolution-data-server \
+    evolution-data-server netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/build/release/tether /usr/bin/tether
@@ -66,6 +66,12 @@ RUN chmod +x /usr/libexec/bluetooth/obexd
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# See healthcheck.sh's own comment for why this checks bt_list_threads
+# (a real MAP round-trip) rather than trusting bt_status (adapter/bond
+# state only, stays "ok" even after the MAP session has silently died).
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
 
 EXPOSE 5134
 

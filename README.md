@@ -1,7 +1,7 @@
-# G2 iMessage Bridge — Working Implementation + Feature Request
+# G2 iMessage Bridge — Proof of Concept (Shelved)
 
 **Author:** Tyler Sellers
-**Status:** ✅ Working end-to-end (real hardware) — glasses app reads/replies to iMessage/SMS threads via a self-hosted bridge, no jailbreak, no Mac proxy.
+**Status:** ⚠️ Proof of concept, shelved. Every individual piece works — pairing, MAP thread read, MAP send, ANCS live notifications, HTTPS relay, glasses UI — but the underlying iOS Bluetooth accessory session (MAP + ANCS) is **too brittle for daily use**: it silently drops/goes stale on its own, on a timescale of hours to a couple of days, with no reliable signal to the accessory that it happened. A Docker healthcheck + autoheal watchdog was built and confirmed effective for one *class* of failure (a fully dead MAP session — container restart fixes it), but a second, distinct failure mode (ANCS live-push silently stops updating while MAP still answers *stale* cached data) needed a manual `tether --bt-solicit` re-negotiation to clear, and is not something a container restart alone detects or fixes. This repo is published as-is for reference/research value, not as a maintained daily-driver.
 
 This repo has two parts:
 1. **A working self-hosted implementation** (`docker/` + `app/`) — a Docker
@@ -115,6 +115,53 @@ This repo has two parts:
   per BlueFerry's own findings, needs iOS 19+. Not something this project
   can fix; noted here since it affects the phased-scope feature request
   below.
+
+## Why this was ultimately shelved: the Bluetooth session is too brittle
+
+This is the actual reason the project stops here, and it's worth being
+precise about, since every *individual* piece of the stack worked:
+
+- **Two distinct failure modes were observed in production use, not just
+  during development:**
+  1. **MAP session dies outright.** `obexd` logs repeated `Connection
+     refused (111)` / `Unable to find service record`, and `bt_list_threads`
+     starts returning an empty `{"threads":[]}`. A Docker `HEALTHCHECK` +
+     [`willfarrell/autoheal`](https://github.com/willfarrell/autoheal)
+     watchdog was built for exactly this: the healthcheck calls
+     `bt_list_threads` (a real functional round-trip, since `bt_status`
+     alone reports adapter/bond health and stays "ok" even with a dead MAP
+     session), and autoheal restarts the container automatically when it's
+     detected. **This was verified working end-to-end** via a deliberate
+     forced failure test.
+  2. **ANCS goes stale silently while MAP still "works."** The connection
+     stays up, `bt_list_threads` keeps answering without error — just with
+     data that's hours old, because the live push channel (ANCS, over BLE)
+     stopped delivering updates without dropping the link or logging an
+     error the daemon can see. A container restart does **not** fix this.
+     The only thing that did was `tether --bt-solicit` (re-negotiate ANCS
+     permissions without touching the pairing bond) — a manual,
+     one-off command, not something the existing healthcheck detects or
+     triggers automatically.
+- **Neither failure mode is caused by a bug in this project's code.** Both
+  are iOS's own Bluetooth accessory management being opaque and
+  unreliable for non-Apple accessories — there is no push signal telling
+  the Linux side "ANCS just stopped," and no documented way to detect
+  staleness other than comparing timestamps against wall-clock time and
+  guessing.
+- **A fully automated fix is possible in principle** (poll `bt_threads`
+  timestamps, auto-fire `--bt-solicit` if the newest one looks too old)
+  but was not built — even with that, the underlying session is
+  fundamentally at the mercy of iOS's undocumented, unannounced
+  connection management, and there's no guarantee a future failure mode
+  won't need yet another manual recovery step this project hasn't
+  encountered yet.
+- **Bottom line:** this is genuinely useful as a proof that the MAP+ANCS
+  protocol path works and can support real read/reply (not just
+  notification mirroring), but it is not something that can be handed to
+  a non-technical user as a reliable daily driver without occasional
+  SSH-side intervention. A real fix requires this living in Apple-signed,
+  properly backgrounded native code (see the feature request below), not
+  a self-hosted Linux relay.
 
 ## Repo layout
 
